@@ -1,0 +1,150 @@
+===================================================================
+  nixpkgs#507531 / NixOS/nix#15638 — A/B reproduction
+  Runs the same trigger sequence twice on the same store path:
+  once via the system nix-daemon (unpatched), once via a private
+  daemon built from this PR. Prints a side-by-side comparison.
+
+  Spawns a private nix-daemon as root (one sudo prompt). The
+  system nix-daemon is not touched. Cleanup runs on exit.
+  Wall time: ~5-7 min.
+===================================================================
+
+==> Setup 1/3: populate fish's build-time closure
+
+==> Setup 2/3: substitute fish + fish-doc from cache
+
+==> Setup 3/3: spawn patched nix-daemon on private socket (sudo)
+warning: $HOME ('/Users/akirby') is not owned by you, falling back to the one defined in the 'passwd' file ('/var/root')
+    patched daemon up at /private/tmp/507531-ab-test-96683/socket
+accepted connection from pid <unknown>, user akirby (trusted)
+reaped child process 96730, status = succeeded
+
+==> A/B step 1: rebuild via UNPATCHED system daemon (3 iterations to show determinism)
+
+    --- iteration 1/3 ---
+      finding garbage collector roots...
+      removing stale temporary roots file '/nix/var/nix/temproots/94823'
+      deleting '/nix/store/gngn7y9mn510mf1hkmr0l69qbpvxfbfh-fish-4.2.1'
+      deleting unused links...
+      note: currently hard linking saves 4574.96 MiB
+      1 store paths deleted, 26.50 MiB freed
+      this derivation will be built:
+        /nix/store/s8swwl2iva8bw1yzcpdbifskbpw8cwhl-fish-4.2.1.drv
+      building '/nix/store/s8swwl2iva8bw1yzcpdbifskbpw8cwhl-fish-4.2.1.drv'...
+      /nix/store/gngn7y9mn510mf1hkmr0l69qbpvxfbfh-fish-4.2.1
+      NAR:    sha256:1qplch87dy4242vxwi3s5h62m6gnywn0f8z9wf659vkrh6hm4a0g
+      result: 1/2526 mismatches
+
+    --- iteration 2/3 ---
+      finding garbage collector roots...
+      deleting '/nix/store/gngn7y9mn510mf1hkmr0l69qbpvxfbfh-fish-4.2.1'
+      deleting unused links...
+      note: currently hard linking saves 4574.96 MiB
+      1 store paths deleted, 26.50 MiB freed
+      this derivation will be built:
+        /nix/store/s8swwl2iva8bw1yzcpdbifskbpw8cwhl-fish-4.2.1.drv
+      building '/nix/store/s8swwl2iva8bw1yzcpdbifskbpw8cwhl-fish-4.2.1.drv'...
+      /nix/store/gngn7y9mn510mf1hkmr0l69qbpvxfbfh-fish-4.2.1
+      NAR:    sha256:1qplch87dy4242vxwi3s5h62m6gnywn0f8z9wf659vkrh6hm4a0g
+      result: 1/2526 mismatches
+
+    --- iteration 3/3 ---
+      finding garbage collector roots...
+      deleting '/nix/store/gngn7y9mn510mf1hkmr0l69qbpvxfbfh-fish-4.2.1'
+      deleting unused links...
+      note: currently hard linking saves 4574.96 MiB
+      1 store paths deleted, 26.50 MiB freed
+      this derivation will be built:
+        /nix/store/s8swwl2iva8bw1yzcpdbifskbpw8cwhl-fish-4.2.1.drv
+      building '/nix/store/s8swwl2iva8bw1yzcpdbifskbpw8cwhl-fish-4.2.1.drv'...
+      /nix/store/gngn7y9mn510mf1hkmr0l69qbpvxfbfh-fish-4.2.1
+      NAR:    sha256:1qplch87dy4242vxwi3s5h62m6gnywn0f8z9wf659vkrh6hm4a0g
+      result: 1/2526 mismatches
+
+==> A/B step 2: rebuild via PATCHED daemon (NixOS/nix#15638)
+    finding garbage collector roots...
+    deleting '/nix/store/gngn7y9mn510mf1hkmr0l69qbpvxfbfh-fish-4.2.1'
+    deleting unused links...
+    note: currently hard linking saves 4574.96 MiB
+    1 store paths deleted, 26.50 MiB freed
+accepted connection from pid <unknown>, user akirby (trusted)
+warning: $HOME ('/Users/akirby') is not owned by you, falling back to the one defined in the 'passwd' file ('/var/root')
+    this derivation will be built:
+      /nix/store/s8swwl2iva8bw1yzcpdbifskbpw8cwhl-fish-4.2.1.drv
+    building '/nix/store/s8swwl2iva8bw1yzcpdbifskbpw8cwhl-fish-4.2.1.drv'...
+    /nix/store/gngn7y9mn510mf1hkmr0l69qbpvxfbfh-fish-4.2.1
+reaped child process 2047, status = succeeded
+accepted connection from pid <unknown>, user akirby (trusted)
+reaped child process 3562, status = succeeded
+
+
+===================================================================
+  A/B COMPARISON
+===================================================================
+
+  Held constant across both runs:
+    Store path:    /nix/store/gngn7y9mn510mf1hkmr0l69qbpvxfbfh-fish-4.2.1
+    Drv path:      /nix/store/s8swwl2iva8bw1yzcpdbifskbpw8cwhl-fish-4.2.1.drv
+    nixpkgs rev:   d96b37bbeb9840f1c0ebfe90585ef5067b69bbb3
+    Trigger:       fish-doc in store, fish bin absent at build start,
+                   --option substitute false (forces local rebuild)
+
+  Variable (the daemon doing the build):
+    UNPATCHED:     system nix-daemon (2.24.10)
+    PATCHED:       patched nix-daemon (2.35.0pre20260408_883e433, NixOS/nix#15638)
+
+  +----------------------+--------------------------------------+--------------------------------------+
+  |                      | UNPATCHED                            | PATCHED                              |
+  +----------------------+--------------------------------------+--------------------------------------+
+  | iterations           | bit-identical (3/3 iterations)       | 1 (single rebuild)                   |
+  | codesign --verify    | FAIL (exit 1)                        | PASS (exit 0)                        |
+  | fish --version       | SIGKILL (rc=137)                     | rc=0 (runs cleanly)                  |
+  | check.py             | 1/2526 mismatches                    | 0/2526 mismatches                    |
+  | mismatched page      | page 1872 @ 0x00750000               | (none)                               |
+  | CodeDirectory        | flags=0x20002(adhoc,linker-signed)   | flags=0x20002(adhoc,linker-signed)   |
+  | hash count           | hashes=2526+0                        | hashes=2526+0                        |
+  +----------------------+--------------------------------------+--------------------------------------+
+
+  NAR hashes:
+    UNPATCHED iter 1:  sha256:1qplch87dy4242vxwi3s5h62m6gnywn0f8z9wf659vkrh6hm4a0g
+    UNPATCHED iter 2:  sha256:1qplch87dy4242vxwi3s5h62m6gnywn0f8z9wf659vkrh6hm4a0g  (bit-identical to iter 1)
+    UNPATCHED iter 3:  sha256:1qplch87dy4242vxwi3s5h62m6gnywn0f8z9wf659vkrh6hm4a0g  (bit-identical to iter 1)
+    PATCHED:           sha256:0k4r1qv58cvvmalikfmwxw73gd63vg9k07wvi6gcv6427l7mbnkc
+
+    → unpatched: bit-identical across 3 iterations
+                 (the bug fires deterministically under the trigger setup)
+    → patched:   different bytes from unpatched, same store path
+                 (the helper recomputed the affected page hash slots in place)
+
+  ===================================================================
+    RESULT
+  ===================================================================
+
+  [PASS] UNPATCHED  bug reproduced deterministically
+                    (3 iterations, all bit-identical, all 1/2526 mismatch,
+                     all codesign FAIL, all kernel SIGKILL)
+
+  [PASS] PATCHED    fix applied as expected
+                    (0/2526 mismatches, codesign PASS, fish runs)
+
+  Interpretation:
+
+  The bug fires deterministically on the unpatched daemon under this
+  trigger: 3 independent rebuilds produced bit-identical corrupted
+  binaries (same NAR hash, same single page-hash mismatch at slot 1872,
+
+  Same store path, same nixpkgs revision, same trigger sequence;
+  only the daemon was varied. The unpatched daemon's RewritingSink
+  invalidated one page hash slot during scratch->final substitution,
+  and the macOS kernel rejected the binary at first page-in. The
+  patched daemon's RewritingSink performed the same substitution
+  then ran fixupMachoPageHashes to recompute the affected page hash
+  slots in place; the kernel accepted the result.
+
+  The CodeDirectory structure (flags including the linker-signed
+  bit, hash count, page size) is identical between the two runs:
+  the helper updates only the page hash slots that the rewrite
+  invalidated, leaving every other byte of the signature alone.
+
+
+==> Cleanup
