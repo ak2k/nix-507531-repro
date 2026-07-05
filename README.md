@@ -10,7 +10,10 @@ Three flake apps targeting `aarch64-darwin`:
 
 - **`unpatched-test`** — demonstrates the bug only. Sets up the trigger state (sibling output present, target output absent, substitution disabled), rebuilds via the system `nix-daemon`, and asserts the result is `1/2526` page-hash mismatches + `codesign --verify` failure + SIGKILL.
 
-- **`patched-test`** — demonstrates the fix only. Same trigger setup, but rebuilds via a daemon built from [NixOS/nix#15638's patch](https://github.com/ak2k/nix/tree/darwin-mach-o-page-hash-fixup), and asserts the result is `0/2526` mismatches + valid `codesign` + clean runtime.
+- **`patched-test`** — demonstrates the fix only. Same trigger setup, but rebuilds via a daemon built from [NixOS/nix#15638's branch](https://github.com/ak2k/nix/tree/darwin-mach-o-page-hash-fixup), and asserts the result is `0/2526` mismatches + valid `codesign` + clean runtime.
+
+> [!NOTE]
+> NixOS/nix#15638 was restructured in July 2026. The daemon no longer repairs signatures in-process: it detects the damage (`macho-signature-rewrite-check`, default `refuse`) and execs a privilege-dropped repair hook (`macho-signature-repair-hook`, defaulting to `nix __fixup-macho`), registering the output only after the repaired signatures re-verify. The `patched-nix` flake input tracks the PR branch, so `patched-test` builds and exercises the current mechanism; the observable assertions (0 mismatches, valid codesign, clean runtime) are unchanged.
 
 All three tests target the exact same `nixpkgs` revision (`d96b37bbeb9840f1c0ebfe90585ef5067b69bbb3`) and the exact same store path (`/nix/store/gngn7y9mn510mf1hkmr0l69qbpvxfbfh-fish-4.2.1`). The only variable between them is the daemon doing the rebuild.
 
@@ -70,7 +73,7 @@ The script asserts the bug is reproduced and exits 0 on `PASS`, non-zero on `FAI
 Steps 1, 2, 4 are identical. Steps 3 and 5 use a private `nix-daemon` instance built from [NixOS/nix#15638](https://github.com/NixOS/nix/pull/15638)'s patch:
 
 3. **(sudo)** Spawns the patched `nix-daemon` on `/private/tmp/507531-patched-test-$$/socket`, listening as root (cleanup on exit).
-5. Rebuilds via the patched daemon (`NIX_REMOTE=unix://...`). The patched daemon runs the same `RewritingSink` rewrite, then invokes `fixupMachoPageHashes` to recompute the page hashes that the rewrite invalidated.
+5. Rebuilds via the patched daemon (`NIX_REMOTE=unix://...`). The patched daemon detects that the `RewritingSink` rewrite would invalidate the signed binary's page hashes, runs the repair hook (`nix __fixup-macho`) with dropped privileges to recompute them, and re-checks the signature before registering the output.
 
 The script asserts the binary is now clean and exits 0 on `PASS`, non-zero on `FAIL`.
 
@@ -79,6 +82,8 @@ The system `nix-daemon` is not touched. The patched daemon runs as a separate pr
 ## Recorded sample output
 
 If you don't want to run the test yourself, [`examples/ab-test-output.txt`](examples/ab-test-output.txt) contains a real captured transcript of a passing `ab-test` run on `aarch64-darwin` (macOS 26.2) — same store path, same nixpkgs revision, same trigger sequence, same `1qplch87...` NAR hash across all 3 unpatched iterations and a different `0k4r1qv5...` for the patched rebuild.
+
+The transcript was recorded against the PR's April 2026 revision (in-daemon `fixupMachoPageHashes`), so its narration names that mechanism; the trigger, assertions, and results are the same under the current hook-based revision.
 
 <details>
 <summary>Click to expand the recorded transcript inline</summary>
